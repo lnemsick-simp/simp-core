@@ -149,6 +149,7 @@ namespace :deps do
     log_output = %x(#{cmd})
     git_logs['__SIMP CORE__'] = log_output unless log_output.strip.empty?
 
+    #TODO invoke deps:checkout with :curr_suffix
     r10k_helper_curr = R10KHelper.new("Puppetfile.#{args[:curr_suffix]}")
     r10k_helper_curr.each_module do |mod|
       if File.directory?(mod[:path])
@@ -167,6 +168,7 @@ namespace :deps do
           log_output = %x(#{log_cmd})
         end
 
+        # TODO figure out if desired_ref is the correct key when a branch is specified
         unless mod[:desired_ref] == prev_version
           output = [
             "Current version: #{mod[:desired_ref]}   Previous version: #{prev_version.nil? ? 'N/A' : prev_version}",
