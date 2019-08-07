@@ -105,12 +105,15 @@ namespace :deps do
 
 
   desc <<-EOM
+  EXPERIMENTAL
   Generate a list of git logs for the changes since a previous
   simp-core tag.  Includes
   - simp-core changes
   - Individual module changes.  The changes are from the version
     listed in the tag's Puppetfile to the version specified in the
     current Puppetfile
+
+  ASSUMES you have executed deps:checkout[curr_suffix]
 
   Arguments:
     * :prev_tag    => simp-core previous version tag
@@ -164,15 +167,17 @@ namespace :deps do
           log_output = %x(#{log_cmd})
         end
 
-        output = [
-          "Previous version: #{prev_version.nil? ? 'N/A' : prev_version}",
-          'CHANGELOG diff:',
-          changelog_diff_output,
-          '',
-          'Git Log:',
-          + log_output
-        ].join("\n")
-        git_logs[mod[:name]] = output
+        unless mod[:desired_ref] == prev_version
+          output = [
+            "Current version: #{mod[:desired_ref]}   Previous version: #{prev_version.nil? ? 'N/A' : prev_version}",
+            'CHANGELOG diff:',
+             changelog_diff_output,
+            '',
+            'Git Log:',
+            log_output
+          ].join("\n")
+          git_logs[mod[:name]] = output
+        end
       else
         $stderr.puts "WARNING: #{mod[:path]} not found"
       end
