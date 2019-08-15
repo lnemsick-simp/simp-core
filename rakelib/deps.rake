@@ -7,7 +7,7 @@ require 'json'
 
 module Simp ; end
 
-module Simp::ChangelogDiffHelper
+module Simp::SimpCoreDepsHelper
 
   def changelog_diff(component_dir, prev_version)
     diff = nil
@@ -40,6 +40,31 @@ module Simp::ChangelogDiffHelper
     diff
   end
 
+  def get_acceptance_test_info(component_dir)
+    test_info = {}
+    Dir.chdir(component_dir) do
+      suites = Dir.glob('spec/acceptance/suites/*')
+      suites.delete_if { |x| ! File.directory?(x) }
+
+      global_nodeset_dir = 'spec/acceptance/nodesets'
+      suites.each do |suite_dir|
+        nodeset_dir = File.join(suite_dir, 'nodesets')
+        if Dir.exist?(nodeset_dir)
+          nodesets = Dir.glob("#{nodeset_dir}/*yml")
+        else
+          nodesets = Dir.glob("#{global_nodeset_dir}/*yml")
+        end
+        nodesets.delete_if { |nodeset| File.symlink?(nodeset) }
+
+        suite = File.basename(suite_dir)
+        test_info[suite] = {
+          :nodesets => nodesets.map {|nodeset| File.basename(nodeset, '.yml') }
+        }
+      end
+    end
+    test_info
+  end
+
   def simp_component?(component_dir)
     result = false
     metadata_json_file = File.join(component_dir, 'metadata.json')
@@ -64,7 +89,7 @@ end
 
 
 include Pager
-include Simp::ChangelogDiffHelper
+include Simp::SimpCoreDepsHelper
 
 
 namespace :deps do
@@ -225,29 +250,8 @@ namespace :deps do
     component_dirs.sort_by! { |x| File.basename(x) }
     component_dirs.each do |component_dir|
       next unless simp_component?(component_dir)
-      Dir.chdir(component_dir) do
-        component = File.basename(component_dir)
-        test_params[component] = {}
-
-        suites = Dir.glob('spec/acceptance/suites/*')
-        suites.delete_if { |x| ! File.directory?(x) }
-
-        global_nodeset_dir = 'spec/acceptance/nodesets'
-        suites.each do |suite_dir|
-          nodeset_dir = File.join(suite_dir, 'nodesets')
-          if Dir.exist?(nodeset_dir)
-            nodesets = Dir.glob("#{nodeset_dir}/*yml")
-          else
-            nodesets = Dir.glob("#{global_nodeset_dir}/*yml")
-          end
-          nodesets.delete_if { |nodeset| File.symlink?(nodeset) }
-
-          suite = File.basename(suite_dir)
-          test_params[component][suite] = {
-            :nodesets => nodesets.map {|nodeset| File.basename(nodeset, '.yml') }
-          }
-        end
-      end
+      component = File.basename(component_dir)
+      test_params[component] = get_acceptance_test_info(component_dir)
     end
 puts test_params.to_yaml
   end
