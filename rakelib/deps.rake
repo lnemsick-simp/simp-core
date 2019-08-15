@@ -203,4 +203,53 @@ namespace :deps do
     end
   end
 
+  desc <<-EOM
+  Logs the .gitlab-ci.yaml coverage for the acceptance test suites, taking
+  into consideration nodesets available for the suite and whether the tests
+  should be run in FIPS-mode.
+
+  ASSUMES
+  - You have executed deps:checkout[appropriate_suffix]
+  - Puppet modules are in src/puppet/modules
+  - Assets are in src/assets
+
+  EOM
+  task :gitlab_job_coverage, [:debug] do |t,args|
+    args.with_defaults(:debug => false)
+
+    test_params = {}
+    module_dirs = Dir.glob('src/puppet/modules/*')
+    asset_dirs = Dir.glob('src/assets/*').delete_if { |x| File.basename(x) == 'simp' }
+    component_dirs = [ '.' ] + module_dirs + asset_dirs
+    component_dirs.map! { |dir| File.expand_path(dir) }
+    component_dirs.sort_by! { |x| File.basename(x) }
+    component_dirs.each do |component_dir|
+      next unless simp_component?(component_dir)
+      Dir.chdir(component_dir) do
+        component = File.basename(component_dir)
+        test_params[component] = {}
+
+        suites = Dir.glob('spec/acceptance/suites/*')
+        suites.delete_if { |x| ! File.directory?(x) }
+
+        global_nodeset_dir = 'spec/acceptance/nodesets'
+        suites.each do |suite_dir|
+          nodeset_dir = File.join(suite_dir, 'nodesets')
+          if Dir.exist?(nodeset_dir)
+            nodesets = Dir.glob("#{nodeset_dir}/*yml")
+          else
+            nodesets = Dir.glob("#{global_nodeset_dir}/*yml")
+          end
+          nodesets.delete_if { |nodeset| File.symlink?(nodeset) }
+
+          suite = File.basename(suite_dir)
+          test_params[component][suite] = {
+            :nodesets => nodesets.map {|nodeset| File.basename(nodeset, '.yml') }
+          }
+        end
+      end
+    end
+puts test_params.to_yaml
+  end
+
 end
