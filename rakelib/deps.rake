@@ -40,8 +40,29 @@ module Simp::SimpCoreDepsHelper
     diff
   end
 
+  def generate_full_acceptance_matrix(test_info, puppet_versions, include_fips = true)
+    component = test_info[:component]
+    return [ [component, 'NONE', 'N/A', 'N/A', 'N/A'] ] if test_info[:suites].empty?
+    tests = []
+    test_info[:suites].each do |suite, config|
+      config[:nodesets].each do |nodeset|
+        puppet_versions.each do |puppet_version|
+          tests << [ component, suite, nodeset, puppet_version, 'disabled' ]
+          if include_fips
+            tests << [ component, suite, nodeset, puppet_version, 'enabled' ]
+          end
+        end
+      end
+    end
+    tests
+  end
+
   def get_acceptance_test_info(component_dir)
-    test_info = {}
+    test_info = {
+      :component => File.basename(component_dir),
+      :suites    => {}
+    }
+
     Dir.chdir(component_dir) do
       suites = Dir.glob('spec/acceptance/suites/*')
       suites.delete_if { |x| ! File.directory?(x) }
@@ -57,12 +78,84 @@ module Simp::SimpCoreDepsHelper
         nodesets.delete_if { |nodeset| File.symlink?(nodeset) }
 
         suite = File.basename(suite_dir)
-        test_info[suite] = {
+        test_info[:suites][suite] = {
           :nodesets => nodesets.map {|nodeset| File.basename(nodeset, '.yml') }
         }
+
+        if suite != 'default'
+          test_meta_file = File.join(suite_dir, 'metadata.yml')
+          if File.exist?(test_meta_file)
+            test_meta = YAML.load(File.read(test_meta_file))
+            if test_meta['default_run']
+              test_info[:suites][suite][:added_to_default] = true
+            end
+          end
+        end
       end
     end
     test_info
+  end
+
+  def get_acceptance_test_matrix(component_dir)
+    test_info = get_acceptance_test_info(component_dir)
+    generate_full_acceptance_matrix(test_info, ['5.5.10', '6'], true)
+  end
+
+  def get_gitlab_acceptance_test_matrix(component_dir)
+    gitlab_yaml_file = File.join(component_dir, '.gitlab-ci.yml')
+    component = File.basename(component_dir)
+    unless File.exist?(gitlab_yaml_file)
+      return [ ['N/A'], [ [component, 'NONE', 'N/A', 'N/A', 'N/A'] ] ]
+    end
+
+    gitlab_yaml = YAML.load(File.read(gitlab_yaml_file))
+    tests = []
+    puppet_versions = []
+    gitlab_yaml.each do |key,value|
+      next unless (value.is_a?(Hash) && value.has_key?('script'))
+      next unless (value.has_key?('stage') && (value['stage'] == 'acceptance'))
+
+      if value.has_key?('variables') && value['variables'].has_key?('PUPPET_VERSION')
+        puppet_version = value['variables']['PUPPET_VERSION']
+      else
+        puppet_version = 'N/A'
+      end
+
+      suite = nil
+      nodeset = nil
+      fips = nil
+      value['script'].each do |line|
+        next unless line.include? 'beaker:suites'
+        if line.include?('[')
+          match = line.match(/beaker:suites\[(.*)(,.*)?\]/)
+          suite = match[1]
+          nodeset = match[2]
+        else
+          suites = Dir.glob("#{component_dir}/spec/acceptance/suites/*")
+          suites.delete_if { |x| ! File.directory?(x) }
+          if suites.size > 1
+            suite = :default_with_additions
+          else
+            suite = 'default'
+          end
+          nodeset = 'default'
+        end
+
+        if line.include?('BEAKER_fips=yes')
+          fips = 'enabled'
+        else
+          fips = 'disabled'
+        end
+      end
+      next unless suite
+
+      suite.strip! if suite.is_a?(String)
+      nodeset = nodeset.nil? ? 'default' : nodeset.strip
+      puppet_versions << puppet_version
+      tests << [ component, suite, nodeset, puppet_version, fips ]
+    end
+    tests = [ [component, 'NONE', 'N/A', 'N/A', 'N/A'] ] if tests.empty?
+    [ puppet_versions.uniq!, tests]
   end
 
   def simp_component?(component_dir)
@@ -229,20 +322,31 @@ namespace :deps do
   end
 
   desc <<-EOM
-  Logs the .gitlab-ci.yaml coverage for the acceptance test suites, taking
-  into consideration nodesets available for the suite and whether the tests
-  should be run in FIPS-mode.
+  Logs the .gitlab-ci.yml coverage for the acceptance test suites, taking
+  into consideration nodesets available for the suite and ASSUMING the tests
+  should also be run in FIPS-mode.
+
+  Each line contains the following columns separated by a ',':
+  - component name (directory name)
+  - suite
+  - nodeset
+  - Puppet version (pulled from the .gitlab-ci.yml)
+  - FIPS status (enabled/disabled)
+  - GitLab job status:
+    - present:       the job is present in .gitlab-ci.yml
+    - absent: :      the job is absent from .gitlab-ci.yml
+    - misconfigured: the job from .gitlab-ci.yml doesn't match the project
 
   ASSUMES
   - You have executed deps:checkout[appropriate_suffix]
   - Puppet modules are in src/puppet/modules
   - Assets are in src/assets
-
   EOM
-  task :gitlab_job_coverage, [:debug] do |t,args|
+  task :gitlab_job_coverage, [:csv, :debug] do |t,args|
+    args.with_defaults(:csv => true)
     args.with_defaults(:debug => false)
 
-    test_params = {}
+    test_sets = []
     module_dirs = Dir.glob('src/puppet/modules/*')
     asset_dirs = Dir.glob('src/assets/*').delete_if { |x| File.basename(x) == 'simp' }
     component_dirs = [ '.' ] + module_dirs + asset_dirs
@@ -250,10 +354,23 @@ namespace :deps do
     component_dirs.sort_by! { |x| File.basename(x) }
     component_dirs.each do |component_dir|
       next unless simp_component?(component_dir)
-      component = File.basename(component_dir)
-      test_params[component] = get_acceptance_test_info(component_dir)
+#      test_sets << get_acceptance_test_matrix(component_dir)
+      puppet_versions, tests = get_gitlab_acceptance_test_matrix(component_dir)
+      test_sets << tests
     end
-puts test_params.to_yaml
+    headings = [
+      'Component',
+      'Suite',
+      'Nodeset',
+      'Puppet Version',
+      'FIPS'
+    ]
+    puts headings.join(',')
+    test_sets.each do |component_tests|
+      component_tests.each do |test|
+        puts test.join(',')
+      end
+    end
   end
 
 end
