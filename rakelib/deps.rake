@@ -201,7 +201,7 @@ namespace :deps do
       end
 
       if misconfigured_found and args[:debug]
-        puts "Misconfiguration detected for #{File.basename(component_dir)}"
+        puts ">> Misconfiguration detected for #{File.basename(component_dir)}"
         puts "  gitlab tests:"
         gitlab_tests.each { |test_info| puts ' '*4 + test_info.inspect }
         puts "  possible tests:"
@@ -218,10 +218,8 @@ namespace :deps do
       'Status'
     ]
     puts headings.join(',')
-    test_sets.each do |component_tests|
-      component_tests.each do |test|
-        puts test.join(',')
-      end
+    test_sets.each do |test|
+      puts test.join(',')
     end
   end
 

@@ -65,16 +65,33 @@ module Simp::SimpCoreDepsHelper
       suites.each do |suite_dir|
         nodeset_dir = File.join(suite_dir, 'nodesets')
         if Dir.exist?(nodeset_dir)
-          nodesets = Dir.glob("#{nodeset_dir}/*yml")
+          all_nodesets = Dir.glob("#{nodeset_dir}/*yml")
         else
-          nodesets = Dir.glob("#{global_nodeset_dir}/*yml")
+          all_nodesets = Dir.glob("#{global_nodeset_dir}/*yml")
         end
+        nodesets = all_nodesets.dup
         nodesets.delete_if { |nodeset| File.symlink?(nodeset) }
 
         suite = File.basename(suite_dir)
         test_info[:suites][suite] = {
           :nodesets => nodesets.map {|nodeset| File.basename(nodeset, '.yml') }
         }
+
+        linked_nodesets = all_nodesets.dup
+        linked_nodesets.delete_if { |nodeset| !File.symlink?(nodeset) }
+
+        linked_nodesets.each do |link_path|
+          source =  File.basename(File.readlink(link_path), '.yml')
+          link = File.basename(link_path, '.yml')
+
+          test_info[:suites][suite][:nodesets].map! do |nodeset|
+            if nodeset == source
+              "#{link}(#{source})"
+            else
+              nodeset
+            end
+          end
+        end
 
         if suite != 'default'
           test_meta_file = File.join(suite_dir, 'metadata.yml')
@@ -118,11 +135,12 @@ module Simp::SimpCoreDepsHelper
 
       suite = nil
       nodeset = nil
+      is_global_nodeset = nil
       fips = nil
       value['script'].each do |line|
         next unless line.include? 'beaker:suites'
         if line.include?('[')
-          match = line.match(/beaker:suites\[(\w*)(,(\w*))?\]/)
+          match = line.match(/beaker:suites\[([\w\-_]*)(,([\w\-_]*))?\]/)
           suite = match[1]
           nodeset = match[3]
         else
@@ -146,6 +164,17 @@ module Simp::SimpCoreDepsHelper
 
       suite.strip! if suite.is_a?(String)
       nodeset = nodeset.nil? ? 'default' : nodeset.strip
+
+      nodeset_yml = "#{component_dir}/spec/acceptance/suites/#{suite}/#{nodeset}.yml"
+      unless File.exist?(nodeset_yml)
+        nodeset_yml = "#{component_dir}/spec/acceptance/nodesets/#{nodeset}.yml"
+      end
+
+      if File.symlink?(nodeset_yml)
+        source = File.basename(File.readlink(nodeset_yml), '.yml')
+        nodeset = "#{nodeset}(#{source})"
+      end
+
       puppet_versions << puppet_version
       tests << [ component, suite, nodeset, puppet_version, fips ]
     end
