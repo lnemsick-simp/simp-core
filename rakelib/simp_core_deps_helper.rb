@@ -33,17 +33,54 @@ module Simp::SimpCoreDepsHelper
     diff
   end
 
+  # @returns array of suites executed along with the default suite when
+  # 'bundle exec rake beaker:suites' is called without specifying a suite
+  def default_suite_additions(component_dir)
+    additions = []
+    Dir.chdir(component_dir) do
+      suites = Dir.glob('spec/acceptance/suites/*')
+      suites.delete_if { |x| (! File.directory?(x)) || (File.basename(x) == 'default') }
+      suites.each do |suite_dir|
+        test_meta_file = File.join(suite_dir, 'metadata.yml')
+        if File.exist?(test_meta_file)
+          test_meta = YAML.load(File.read(test_meta_file))
+          if test_meta['default_run']
+            additions << File.basename(suite_dir)
+          end
+        end
+      end
+    end
+    additions
+  end
+
   def generate_full_acceptance_matrix(test_info, puppet_versions, include_fips = true)
     component = test_info[:component]
-    return [ [component, 'NONE', 'N/A', 'N/A', 'N/A'] ] if test_info[:suites].empty?
-    return [ [component, 'NONE', 'N/A', 'N/A', 'N/A'] ] if puppet_versions.nil? || puppet_versions.empty?
+    if test_info[:suites].empty? || puppet_versions.nil? || puppet_versions.empty?
+      null_test = {
+        :component      => component,
+        :suite          => 'NONE',
+        :nodeset        => 'N/A',
+        :puppet_version => 'N/A',
+        :fips           => 'N/A'
+      }
+      return [ null_test ]
+    end
     tests = []
     test_info[:suites].each do |suite, config|
       config[:nodesets].each do |nodeset|
         puppet_versions.each do |puppet_version|
-          tests << [ component, suite, nodeset, puppet_version, 'disabled' ]
+          test = {
+            :component      => component,
+            :suite          => suite,
+            :nodeset        => nodeset,
+            :puppet_version => puppet_version,
+            :fips           => :disabled
+          }
+          tests << test
           if include_fips
-            tests << [ component, suite, nodeset, puppet_version, 'enabled' ]
+            fips_test = test.dup
+            fips_test[:fips] = :enabled
+            tests << fips_test
           end
         end
       end
@@ -51,7 +88,7 @@ module Simp::SimpCoreDepsHelper
     tests
   end
 
-  def get_acceptance_test_info(component_dir)
+  def acceptance_test_info(component_dir)
     test_info = {
       :component => File.basename(component_dir),
       :suites    => {}
@@ -86,19 +123,9 @@ module Simp::SimpCoreDepsHelper
 
           test_info[:suites][suite][:nodesets].map! do |nodeset|
             if nodeset == source
-              "#{link}(#{source})"
+              "#{link}->#{source}"
             else
               nodeset
-            end
-          end
-        end
-
-        if suite != 'default'
-          test_meta_file = File.join(suite_dir, 'metadata.yml')
-          if File.exist?(test_meta_file)
-            test_meta = YAML.load(File.read(test_meta_file))
-            if test_meta['default_run']
-              test_info[:suites][suite][:added_to_default] = true
             end
           end
         end
@@ -107,17 +134,26 @@ module Simp::SimpCoreDepsHelper
     test_info
   end
 
-  def get_acceptance_test_matrix(component_dir, puppet_versions)
-    test_info = get_acceptance_test_info(component_dir)
+  # @returns complete set of possible acceptance tests that can be run
+  def acceptance_test_matrix(component_dir, puppet_versions)
+    test_info = acceptance_test_info(component_dir)
     matrix = generate_full_acceptance_matrix(test_info, puppet_versions, true)
     matrix.sort_by { |test_info| test_info.to_s }
   end
 
-  def get_gitlab_acceptance_test_matrix(component_dir)
+  def gitlab_acceptance_test_matrix(component_dir)
     gitlab_yaml_file = File.join(component_dir, '.gitlab-ci.yml')
     component = File.basename(component_dir)
+    null_test = {
+      :component      => component,
+      :suite          => 'NONE',
+      :nodeset        => 'N/A',
+      :puppet_version => 'N/A',
+      :fips           => 'N/A'
+    }
+
     unless File.exist?(gitlab_yaml_file)
-      return [ ['N/A'], [ [component, 'NONE', 'N/A', 'N/A', 'N/A'] ] ]
+      return [ ['N/A'], [ null_test ] ]
     end
 
     gitlab_yaml = YAML.load(File.read(gitlab_yaml_file))
@@ -147,7 +183,7 @@ module Simp::SimpCoreDepsHelper
           suites = Dir.glob("#{component_dir}/spec/acceptance/suites/*")
           suites.delete_if { |x| ! File.directory?(x) }
           if suites.size > 1
-            suite = :default_with_additions
+            suite = (['default'] + default_suite_additions(component_dir)).join('+')
           else
             suite = 'default'
           end
@@ -155,9 +191,9 @@ module Simp::SimpCoreDepsHelper
         end
 
         if line.include?('BEAKER_fips=yes')
-          fips = 'enabled'
+          fips = :enabled
         else
-          fips = 'disabled'
+          fips = :disabled
         end
       end
       next unless suite
@@ -172,13 +208,20 @@ module Simp::SimpCoreDepsHelper
 
       if File.symlink?(nodeset_yml)
         source = File.basename(File.readlink(nodeset_yml), '.yml')
-        nodeset = "#{nodeset}(#{source})"
+        nodeset = "#{nodeset}->#{source}"
       end
 
       puppet_versions << puppet_version
-      tests << [ component, suite, nodeset, puppet_version, fips ]
+      test = {
+        :component      => component,
+        :suite          => suite,
+        :nodeset        => nodeset,
+        :puppet_version => puppet_version,
+        :fips           => fips
+      }
+      tests << test
     end
-    tests = [ [component, 'NONE', 'N/A', 'N/A', 'N/A'] ] if tests.empty?
+    tests = [ null_test ] if tests.empty?
     [ puppet_versions.uniq!, tests.sort_by { |test_info| test_info.to_s }]
   end
 
@@ -201,5 +244,19 @@ module Simp::SimpCoreDepsHelper
     end
 
     result
+  end
+
+  def test_present?(test_info, gitlab_tests)
+    status = :absent
+    if gitlab_tests.include?(test_info)
+      # exact permutation spelled out in a GitLab job
+      status = :present
+    else
+      # test might be bundled with a 'default + additions' GitLab job
+      gitlab_tests.each do |gitlab_test_info|
+        next if gitlab_test_info
+      end
+   end
+   status
   end
 end

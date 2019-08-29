@@ -178,25 +178,27 @@ namespace :deps do
     component_dirs.each do |component_dir|
       next unless simp_component?(component_dir)
       puts "Processing #{File.basename(component_dir)}" if args[:debug]
-      puppet_versions, gitlab_tests = get_gitlab_acceptance_test_matrix(component_dir)
-      possible_test_sets = get_acceptance_test_matrix(component_dir, puppet_versions)
-      if args[:debug]
-      end
+      puppet_versions, gitlab_tests = gitlab_acceptance_test_matrix(component_dir)
+      possible_test_sets = acceptance_test_matrix(component_dir, puppet_versions)
 
       possible_test_sets.each do |test_info|
-        test_present = gitlab_tests.include?(test_info) ? 'present' : 'absent'
+        test_info_with_status = test_info.dup
+        if test_info_with_status[:suite] == 'NONE'
+          test_info_with_status[:status] = 'N/A'
+        else
+          test_info_with_status[:status] = gitlab_tests.include?(test_info) ? 'present' : 'absent'
+        end
 
-        # if the test suite is NONE, presence is immaterial
-        test_present = 'N/A' if test_info[1] == 'NONE'
-
-        test_sets << (test_info + [ test_present ] )
+        test_sets << test_info_with_status
       end
 
       misconfigured_found = false
       gitlab_tests.each do |test_info|
         unless possible_test_sets.include?(test_info)
+          test_info_with_status = test_info.dup
           misconfigured_found = true
-          test_sets << (test_info + ['misconfigured'])
+          test_info_with_status[:status] = :misconfigured
+          test_sets << test_info_with_status
         end
       end
 
@@ -219,7 +221,7 @@ namespace :deps do
     ]
     puts headings.join(',')
     test_sets.each do |test|
-      puts test.join(',')
+      puts test.to_a.join(',')
     end
   end
 
