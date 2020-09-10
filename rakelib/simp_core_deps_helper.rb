@@ -179,11 +179,15 @@ module Simp::SimpCoreDepsHelper
           match = line.match(/beaker:suites\[([\w\-_]*)(,([\w\-_]*))?\]/)
           suite = match[1]
           nodeset = match[3]
+          if nodeset.nil?
+            puts "#{component} job '#{key}' missing nodeset: #{line}"
+          end
         else
+          puts "#{component} job '#{key}' missing suite and nodeset: #{line}"
           suites = Dir.glob("#{component_dir}/spec/acceptance/suites/*")
           suites.delete_if { |x| ! File.directory?(x) }
           if suites.size > 1
-            suite = (['default'] + default_suite_additions(component_dir)).join('+')
+            suite = (['default'] + default_suite_additions(component_dir))
           else
             suite = 'default'
           end
@@ -252,9 +256,17 @@ module Simp::SimpCoreDepsHelper
       # exact permutation spelled out in a GitLab job
       status = :present
     else
-      # test might be bundled with a 'default + additions' GitLab job
+      # test might be bundled with a implied 'default + additions' GitLab job
+      # when beaker:suites has no arguments
       gitlab_tests.each do |gitlab_test_info|
-        next if gitlab_test_info
+        if ( gitlab_test_info[:suite].is_a?(Array) &&
+             gitlab_test_info[:suite].include?(test_info[:suite]) &&
+             (gitlab_test_info[:nodeset] == test_info[:nodeset]) &&
+             (gitlab_test_info[:puppet_version] == test_info[:puppet_version]) &&
+             (gitlab_test_info[:fips] == test_info[:fips])
+        )
+          status = 'included via no suite'
+        end
       end
    end
    status

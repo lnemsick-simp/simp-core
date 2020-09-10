@@ -186,7 +186,7 @@ namespace :deps do
         if test_info_with_status[:suite] == 'NONE'
           test_info_with_status[:status] = 'N/A'
         else
-          test_info_with_status[:status] = gitlab_tests.include?(test_info) ? 'present' : 'absent'
+          test_info_with_status[:status] = test_present?(test_info, gitlab_tests)
         end
 
         test_sets << test_info_with_status
@@ -195,19 +195,31 @@ namespace :deps do
       misconfigured_found = false
       gitlab_tests.each do |test_info|
         unless possible_test_sets.include?(test_info)
-          test_info_with_status = test_info.dup
-          misconfigured_found = true
-          test_info_with_status[:status] = :misconfigured
-          test_sets << test_info_with_status
+          if test_info[:suite].is_a?(Array)
+            test_info[:suite].each do |suite|
+              individual_test_info = test_info.dup
+              individual_test_info[:suite] = suite
+              unless possible_test_sets.include?(individual_test_info)
+                test_info_with_status = test_info.dup
+                misconfigured_found = true
+                test_info_with_status[:status] = :misconfigured
+                test_sets << test_info_with_status
+              end
+            end
+          end
         end
       end
 
-      if misconfigured_found and args[:debug]
-        puts ">> Misconfiguration detected for #{File.basename(component_dir)}"
-        puts "  gitlab tests:"
-        gitlab_tests.each { |test_info| puts ' '*4 + test_info.inspect }
-        puts "  possible tests:"
-        possible_test_sets.each { |test_info| puts' '*4 +  test_info.inspect }
+      if args[:debug]
+        if misconfigured_found
+          puts ">> Misconfiguration detected for #{File.basename(component_dir)}"
+        else
+          puts ">> Valid configuration detected for #{File.basename(component_dir)}"
+        end
+        puts ">>  gitlab tests:"
+        gitlab_tests.each { |test_info| puts '>>' + ' '*4 + test_info.inspect }
+        puts ">>  possible tests:"
+        possible_test_sets.each { |test_info| puts '>>' + ' '*4 +  test_info.inspect }
       end
     end
 
@@ -221,7 +233,7 @@ namespace :deps do
     ]
     puts headings.join(',')
     test_sets.each do |test|
-      puts test.to_a.join(',')
+      puts test.values.join(',')
     end
   end
 
