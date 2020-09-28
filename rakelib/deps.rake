@@ -79,9 +79,9 @@ namespace :deps do
 
         Dir.chdir(mod[:path]) do
           if prev_version
-            log_cmd = "git log #{prev_version}..HEAD --reverse #{log_args}"
+            log_cmd = "git log #{prev_version}..HEAD #{log_args}"
           else
-            log_cmd = "git log --reverse #{log_args}"
+            log_cmd = "git log #{log_args}"
           end
 
           puts "In #{File.basename(Dir.pwd)} executing: #{log_cmd}" if debug
