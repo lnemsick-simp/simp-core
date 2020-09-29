@@ -56,7 +56,7 @@ namespace :deps do
     git_logs = Hash.new
 
     changelog_diff_output = changelog_diff('src/assets/simp', args[:prev_tag])
-    cmd = "git log #{args[:prev_tag]}..HEAD --reverse #{log_args}"
+    cmd = "git log #{args[:prev_tag]}..HEAD #{log_args}"
     puts "In #{File.basename(Dir.pwd)} executing: #{cmd}" if debug
     log_output = %x(#{cmd})
     output = [
