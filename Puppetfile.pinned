@@ -367,8 +367,10 @@ mod 'simp-simp_firewalld',
   :tag => '0.1.1'
 
 mod 'simp-simp_gitlab',
-  :git => 'https://github.com/simp/pupmod-simp-simp_gitlab',
-  :tag => '0.6.0'
+#  :git => 'https://github.com/simp/pupmod-simp-simp_gitlab',
+#  :tag => '0.6.0'
+  :git => 'https://github.com/lnemsick-simp/pupmod-simp-simp_gitlab',
+  :tag => 'SIMP-8636'
 
 mod 'simp-simp_grub',
   :git => 'https://github.com/simp/pupmod-simp-simp_grub',
