@@ -54,7 +54,7 @@ module Simp::SimpCoreDepsHelper
         end
 
         # TODO figure out if desired_ref is the correct key when a branch is specified
-        unless mod[:desired_ref] == prev_version
+        unless current_tag == prev_version
           output = [
             "Current version: #{mod[:desired_ref]}   Previous version: #{prev_version.nil? ? 'N/A' : prev_version}",
             'CHANGELOG diff:',
